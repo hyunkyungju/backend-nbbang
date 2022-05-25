@@ -1,68 +1,81 @@
 package nbbang.com.nbbang.domain.party.service;
 
 import lombok.RequiredArgsConstructor;
-import nbbang.com.nbbang.domain.bbangpan.domain.PartyMember;
-import nbbang.com.nbbang.domain.bbangpan.repository.PartyMemberRepository;
-import nbbang.com.nbbang.domain.chat.domain.Message;
-import nbbang.com.nbbang.domain.chat.repository.MessageRepository;
+import nbbang.com.nbbang.domain.hashtag.service.HashtagService;
 import nbbang.com.nbbang.domain.member.domain.Member;
 import nbbang.com.nbbang.domain.member.dto.Place;
 import nbbang.com.nbbang.domain.member.service.MemberService;
+import nbbang.com.nbbang.domain.party.dto.single.request.PartyRequestDto;
+import nbbang.com.nbbang.domain.partymember.domain.PartyMember;
+import nbbang.com.nbbang.domain.partymember.service.PartyMemberService;
 import nbbang.com.nbbang.domain.party.domain.*;
 import nbbang.com.nbbang.domain.party.dto.single.PartyUpdateServiceDto;
-import nbbang.com.nbbang.domain.party.repository.PartyHashtagRepository;
 import nbbang.com.nbbang.domain.party.repository.PartyRepository;
 import nbbang.com.nbbang.global.error.exception.NotOwnerException;
-import nbbang.com.nbbang.global.socket.service.SocketPartyMemberService;
+import nbbang.com.nbbang.global.validator.PartyMemberValidator;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.webjars.NotFoundException;
 
 import java.lang.reflect.Field;
-import java.util.Collections;
+import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 import static nbbang.com.nbbang.domain.party.controller.PartyResponseMessage.PARTY_NOT_FOUND;
-import static nbbang.com.nbbang.global.socket.SocketDestination.GLOBAL;
 
 @Service
 @Transactional(readOnly=true)
 @RequiredArgsConstructor
 public class PartyService {
     private final PartyRepository partyRepository;
-    private final PartyHashtagRepository partyHashtagRepository;
     private final HashtagService hashtagService;
     private final MemberService memberService;
     private final PartyMemberService partyMemberService;
-    private final MessageRepository messageRepository;
-    private final SocketPartyMemberService socketPartyMemberService;
+    private final PartyMemberValidator partyMemberValidator;
+
 
     @Transactional
-    public Party create(Party party, Long memberId, List<String> hashtagContents) {
-        Party savedParty = partyRepository.save(party);
-        savedParty.changeStatus(PartyStatus.OPEN);
-        Long partyId = savedParty.getId();
-        // https://sigmasabjil.tistory.com/43
-        Optional.ofNullable(hashtagContents).orElseGet(Collections::emptyList).
-                stream().forEach(content-> addHashtag(partyId, content));
+    public Party create(PartyRequestDto partyRequestDto, Long memberId) {
         Member owner = memberService.findById(memberId);
+        Party party =  Party.builder()
+                .title(partyRequestDto.getTitle())
+                .content(partyRequestDto.getContent())
+                .place(Place.valueOf(partyRequestDto.getPlace().toUpperCase()))
+                .goalNumber(partyRequestDto.getGoalNumber())
+                .createTime(LocalDateTime.now())
+                .status(PartyStatus.OPEN)
+                .owner(owner)
+                .build();
+        hashtagService.linkHashtagsToParty(party, partyRequestDto.getHashtags());
+        Party savedParty = partyRepository.save(party);
         partyMemberService.joinParty(savedParty, owner);
-        party.addOwner(owner);
 
         return savedParty;
     }
+
+
+    @Transactional // 테스트에서만 사용
+    public Party create(Party party, Long memberId, List<String> hashtagContents) {
+        Party savedParty = partyRepository.save(party);
+        savedParty.changeStatus(PartyStatus.OPEN);
+        hashtagService.linkHashtagsToParty(savedParty, hashtagContents);
+        Member owner = memberService.findById(memberId);
+        partyMemberService.joinParty(savedParty, owner);
+        party.setOwner(owner);
+        return savedParty;
+    }
+
 
     public Party findById(Long partyId) {
         Party party = partyRepository.findById(partyId).orElseThrow(() -> new NotFoundException(PARTY_NOT_FOUND));
         return party;
     }
 
-    public Long findIdByParty(Party party) {
-        return Optional.ofNullable(party.getId()).orElseThrow(() -> new NotFoundException("파티의 아이디가 존재하지 않습니다."));
+    public Party findByIdWithPartyMember(Long partyId) {
+        Party party = partyRepository.findWithPartyMember(partyId);
+        if (party == null) throw new NotFoundException(PARTY_NOT_FOUND);
+        return party;
     }
 
     // 현재 Near, ON, 스스로 아님만 구현. Hashtag로 찾는 기능 추가하기.
@@ -72,28 +85,31 @@ public class PartyService {
         List<Party> parties = partyRepository.findByPlaceAndNotSelf(partyId);
         return parties;
     }
+
+    public List<Party> findNearAndSimilar(Long partyId, Place place) {
+        List<Party> parties = partyRepository.findByPlaceAndNotSelf(partyId, place);
+        return parties;
+    }
     
     @Transactional
-    //public Long update(Long partyId, PartyUpdateServiceDto partyUpdateServiceDto) {
-    public Long update(Long partyId, PartyUpdateServiceDto partyUpdateServiceDto, Long memberId) {
+    public void update(Long partyId, PartyUpdateServiceDto partyUpdateServiceDto, Long memberId) {
         Member member = memberService.findById(memberId);
         Party party = findById(partyId);
-        if (!party.getOwner().equals(member)) {
-            throw new NotOwnerException();
-        }
+
+        partyMemberValidator.validateOwner(party, member);
+
         party.update(partyUpdateServiceDto);
+
         if (partyUpdateServiceDto.getHashtagContents().isPresent()) {
             List<String> oldHashtagContents = party.getHashtagContents();
             List<String> newHashtagContents = partyUpdateServiceDto.getHashtagContents().get();
             oldHashtagContents.removeAll(newHashtagContents);
             newHashtagContents.removeAll(party.getHashtagContents());
 
-            Optional.ofNullable(oldHashtagContents).orElseGet(Collections::emptyList)
-                    .stream().forEach(content -> removeHashtag(partyId, content));
-            Optional.ofNullable(newHashtagContents).orElseGet(Collections::emptyList)
-                    .stream().forEach(content -> addHashtag(partyId, content));
+            hashtagService.detachHashtagsFromParty(party,oldHashtagContents);
+            hashtagService.linkHashtagsToParty(party, newHashtagContents);
+
         }
-        return partyId;
     }
 
     @Transactional
@@ -110,33 +126,6 @@ public class PartyService {
             throw new NotOwnerException();
         }
         party.changeGoalNumber(goalNumber);
-    }
-
-    @Transactional
-    public void addHashtag(Long partyId, String content){
-        Party party = findById(partyId);
-        Hashtag hashtag = hashtagService.findOrCreateByContent(content);
-        PartyHashtag.createPartyHashtag(party, hashtag);
-    }
-
-    @Transactional // ************** 구현 필요(쿼리 최적화) ************** /
-    public void addHashtags(Long partyId, List<String> hashtagContents){
-        Party party = findById(partyId);
-        List<Hashtag> hashtags = hashtagService.findOrCreateByContent(hashtagContents);
-        PartyHashtag.createPartyHashtags(party, hashtags);
-    }
-
-    @Transactional
-    public void removeHashtag(Long partyId, String content) {
-        Party party = findById(partyId);
-        PartyHashtag partyHashtag = party.deletePartyHashtag(content);
-        partyHashtagRepository.delete(partyHashtag);
-        hashtagService.deleteIfNotReferred(partyHashtag.getHashtag());
-    }
-
-    public Message findLastMessage(Long partyId) {
-        Message lastMessage = messageRepository.findLastMessage(partyId);
-        return Optional.ofNullable(lastMessage).orElse(Message.builder().id(0L).build());
     }
 
 
@@ -156,7 +145,6 @@ public class PartyService {
 
         return partyMembers.stream()
                 .map(partyMember -> partyMember.getMember()).collect(Collectors.toList());
-
     }
 
 }

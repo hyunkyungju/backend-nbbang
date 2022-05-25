@@ -53,4 +53,19 @@ public class PartyFindResponseDto{
     }
 
 
+    public static PartyFindResponseDto createByEntity(Party party, Long memberId) {
+        return PartyFindResponseDto.builder()
+                .id(party.getId())
+                .title(party.getTitle())
+                .createTime(party.getCreateTime())
+                .goalNumber(party.getGoalNumber())
+                .joinNumber(party.getPartyMembers().size())
+                .status(party.getStatus()!=null?party.getStatus().toString():null)
+                .hashtags(party.getHashtagContents())
+                .place(party.getPlace().toString())
+                .isWishlist(party.isWishlistOf(memberId))
+                .build();
+    }
+
+
 }

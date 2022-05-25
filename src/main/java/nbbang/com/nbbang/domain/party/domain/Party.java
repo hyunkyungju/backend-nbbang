@@ -3,8 +3,8 @@ package nbbang.com.nbbang.domain.party.domain;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
-import nbbang.com.nbbang.domain.bbangpan.domain.PartyMember;
-import nbbang.com.nbbang.domain.chat.domain.ChatSession;
+import nbbang.com.nbbang.domain.hashtag.domain.PartyHashtag;
+import nbbang.com.nbbang.domain.partymember.domain.PartyMember;
 import nbbang.com.nbbang.domain.member.domain.Member;
 import nbbang.com.nbbang.domain.member.dto.Place;
 import nbbang.com.nbbang.domain.party.dto.single.PartyUpdateServiceDto;
@@ -18,9 +18,6 @@ import java.time.LocalDateTime;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 import static javax.persistence.EnumType.STRING;
@@ -55,8 +52,6 @@ public class Party {
     @Enumerated(STRING)
     private Place place;
 
-    // private LocalDateTime cancelTime;
-
     @Builder.Default
     private Integer deliveryFee=0;
 
@@ -69,12 +64,12 @@ public class Party {
 
     private String accountNumber;
 
-    @Builder.Default // https://www.inflearn.com/questions/151658
-    @OneToMany(mappedBy = "party", cascade = CascadeType.ALL)
+    @Builder.Default
+    @OneToMany(cascade = {CascadeType.ALL}, orphanRemoval = true,mappedBy = "party")
     private List<PartyHashtag> partyHashtags = new ArrayList<>();
 
     @Builder.Default
-    @OneToMany(mappedBy = "party")
+    @OneToMany(mappedBy = "party" )
     private List<PartyMember> partyMembers = new ArrayList<>();
 
     @Builder.Default
@@ -91,23 +86,24 @@ public class Party {
         return partyHashtags.stream().map(h -> h.getHashtag().getContent()).collect(Collectors.toList());
     }
 
-    public PartyHashtag deletePartyHashtag(String content){
-        PartyHashtag findPartyHashtag = partyHashtags.stream().filter(partyHashtag -> partyHashtag.getHashtag().getContent() == content)
-                .findAny().orElseThrow(() -> new NotFoundException(HASHTAG_NOT_FOUND));
-        partyHashtags.remove(findPartyHashtag);
-        return findPartyHashtag;
+    public List<PartyHashtag> deletePartyHashtags(List<String> contents) {
+        List<PartyHashtag> deletedPartyHashtags = partyHashtags.stream().filter(partyHashtag -> contents.contains(partyHashtag.getContent())).collect(Collectors.toList());
+        partyHashtags.removeAll(deletedPartyHashtags);
+        return deletedPartyHashtags;
     }
 
-    public void addOwner(Member member) {
-
+    public void setOwner(Member member) {
         this.owner = member;
     }
 
-    public void addMemberParty(PartyMember partyMember) {
+    public void addPartyMember(PartyMember partyMember) {
         this.getPartyMembers().add(partyMember);
     }
 
-    public void exitMemberParty(PartyMember partyMember) {
+    public void exitPartyMember(Long partyMemberId) {
+        partyMembers.removeIf(mp -> mp.getId().equals(partyMemberId));
+    }
+    public void exitPartyMember(PartyMember partyMember) {
         partyMembers.removeIf(mp -> mp.equals(partyMember));
     }
 
@@ -151,4 +147,6 @@ public class Party {
     public static Field getField(String field) throws NoSuchFieldException {
         return Party.class.getDeclaredField(field);
     }
+
+
 }

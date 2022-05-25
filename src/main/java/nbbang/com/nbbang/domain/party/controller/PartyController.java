@@ -22,7 +22,7 @@ import nbbang.com.nbbang.domain.party.dto.single.response.PartyReadResponseDto;
 import nbbang.com.nbbang.domain.party.service.PartyService;
 import nbbang.com.nbbang.domain.party.validation.PartyCreateGroup;
 import nbbang.com.nbbang.global.error.exception.CustomIllegalArgumentException;
-import nbbang.com.nbbang.global.interceptor.CurrentMember;
+import nbbang.com.nbbang.global.security.context.CurrentMember;
 import nbbang.com.nbbang.global.response.DefaultResponse;
 import nbbang.com.nbbang.global.error.GlobalErrorResponseMessage;
 import nbbang.com.nbbang.global.response.StatusCode;
@@ -59,12 +59,11 @@ public class PartyController {
         if (bindingResult.hasErrors()) {
             throw new CustomIllegalArgumentException(GlobalErrorResponseMessage.ILLEGAL_ARGUMENT_ERROR, bindingResult);
         }
-        Member member = memberService.findById(currentMember.id());
-        Party party = partyRequestDto.createEntityByDto();
-        Party createParty = partyService.create(party, currentMember.id(), partyRequestDto.getHashtags());
-        Long partyId = partyService.findIdByParty(createParty);
+        Party party = partyService.create(partyRequestDto, currentMember.id());
+        Long partyId = party.getId();
         return DefaultResponse.res(StatusCode.OK, PartyResponseMessage.PARTY_CREATE_SUCCESS, PartyIdResponseDto.builder().id(partyId).build());
     }
+
 
     @Operation(summary = "파티 상세", description = "파티의 상세 정보입니다.")
     @ApiResponse(responseCode = "200", description = "OK",
@@ -72,7 +71,7 @@ public class PartyController {
     @GetMapping("/{party-id}")
     public DefaultResponse readParty(@PathVariable("party-id") Long partyId){
         Party party = partyService.findById(partyId);
-        List<Party> parties = partyService.findNearAndSimilar(partyId);
+        List<Party> parties = partyService.findNearAndSimilar(partyId, party.getPlace());
         List<PartyFindResponseDto> collect = parties.stream().map(PartyFindResponseDto::createByEntity).collect(Collectors.toList());
         List<String> hashtags = party.getHashtagContents();
         PartyReadResponseDto partyReadResponseDto = PartyReadResponseDto.createDto(party, currentMember.id(), hashtags, collect);

@@ -6,22 +6,26 @@ import org.springframework.data.redis.core.SetOperations;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import javax.annotation.PostConstruct;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
-import static nbbang.com.nbbang.global.security.SecurityPolicy.TOKEN_EXPIRE_TIME;
 
 @Service
 @RequiredArgsConstructor
 @Transactional
 public class LogoutService {
     private final RedisTemplate<String, String> redisTemplate;
+    private final SecurityPolicy securityPolicy;
     private String key = "blocked";
 
+    @PostConstruct
+    public void logoutKey() {
+        redisTemplate.expire(key, securityPolicy.getTokenExpireTime(), TimeUnit.MILLISECONDS);
+    }
 
     public void invalidate(String token) {
         SetOperations<String, String> setOperations = redisTemplate.opsForSet();
-        redisTemplate.expire(key, TOKEN_EXPIRE_TIME, TimeUnit.MILLISECONDS);
         setOperations.add(key, token);
     }
 

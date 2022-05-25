@@ -1,55 +1,52 @@
 package nbbang.com.nbbang.global.interceptor;
 
 import lombok.extern.slf4j.Slf4j;
-import nbbang.com.nbbang.domain.chat.dto.message.ChatSendRequestDto;
 import nbbang.com.nbbang.domain.member.domain.Member;
 import nbbang.com.nbbang.domain.member.dto.Place;
 import nbbang.com.nbbang.domain.member.repository.MemberRepository;
 import nbbang.com.nbbang.domain.party.domain.Party;
 import nbbang.com.nbbang.domain.party.dto.single.request.PartyRequestDto;
-import nbbang.com.nbbang.domain.party.dto.single.response.PartyIdResponseDto;
-import nbbang.com.nbbang.domain.party.service.PartyMemberService;
-import nbbang.com.nbbang.global.error.ErrorResponse;
-import nbbang.com.nbbang.global.error.GlobalErrorResponseMessage;
+import nbbang.com.nbbang.domain.partymember.service.PartyMemberService;
 import nbbang.com.nbbang.global.response.DefaultResponse;
+import nbbang.com.nbbang.global.security.context.CurrentMember;
+import nbbang.com.nbbang.global.support.controller.ControllerMockTestParent;
+import nbbang.com.nbbang.global.support.controller.ControllerMockTestUtil;
 import nbbang.com.nbbang.global.support.controller.ControllerTestUtil;
 import nbbang.com.nbbang.domain.party.service.PartyService;
+import nbbang.com.nbbang.global.support.controller.IntegratedTestParent;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
-import org.springframework.http.MediaType;
-import org.springframework.test.annotation.Rollback;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Arrays;
 
-import static nbbang.com.nbbang.global.error.GlobalErrorResponseMessage.NOT_OWNER_ERROR;
-import static nbbang.com.nbbang.global.response.StatusCode.FORBIDDEN;
 import static nbbang.com.nbbang.global.response.StatusCode.OK;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
+import static reactor.core.publisher.Mono.when;
 
 @SpringBootTest
-@AutoConfigureMockMvc
-@Import({ControllerTestUtil.class, PartyMemberInterceptorTestDto.class})
+@AutoConfigureMockMvc(addFilters = false) // Bypass security filters
+@Import({ControllerMockTestUtil.class, PartyMemberInterceptorTestDto.class})
 @Slf4j
 @Transactional
 @ActiveProfiles("test")
-class PartyMemberInterceptorTest {
+class PartyMemberInterceptorTest extends IntegratedTestParent {
 
     @Autowired private MockMvc mockMvc;
-    @Autowired private ControllerTestUtil controllerTestUtil;
+    @Autowired private ControllerMockTestUtil controllerTestUtil;
     @Autowired private MemberRepository memberRepository;
     @Autowired private PartyService partyService;
     @Autowired private PartyMemberService partyMemberService;
     @Autowired private PartyMemberInterceptorTestDto testDto;
-    @Autowired private CurrentMember currentMember;
+    @MockBean private CurrentMember currentMember;
 
     @BeforeEach
     void support(){
@@ -65,9 +62,13 @@ class PartyMemberInterceptorTest {
         testDto.change(owner.getId(), partyMember.getId(), justMember.getId(), createdParty.getId());
     }
 
+
     @Test
     void ownerSuccess() throws Exception {
-        mockMvc.perform(get("/members/develop/{memberId}/login", testDto.getOwnerId()));
+        // 이런 식으로 security filter 를 bypass 하고 current Member 를 mocking 할 수 있어요
+        when(currentMember.id()).thenReturn(testDto.getOwnerId());
+        //mockMvc.perform(get("/members/develop/{memberId}/login", testDto.getOwnerId()));
+
         DefaultResponse sendChatRes = controllerTestUtil.expectDefaultResponseObject(get("/chats/{partyId}", testDto.getPartyId()));
         Assertions.assertThat(sendChatRes.getStatusCode()).isEqualTo(OK);
 
